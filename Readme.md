@@ -11,7 +11,7 @@ quarto render Readme.md --to pdf
 Analysis Geo 880**
 
 | Semester:      | FS24                                            |
-|:---------------|:---------------------------------------- -------|
+|:---------------|:------------------------------------------------|
 | **Data:**      | GPS Trajectory data                             |
 | **Title:**     | Walking detection from daily GPS trajectories   |
 | **Student:**   | Xiao Cui                                        |
