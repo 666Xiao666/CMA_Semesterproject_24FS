@@ -10,25 +10,25 @@ quarto render Readme.md --to pdf
 **Patterns & Trends in Environmental Data / Computational Movement
 Analysis Geo 880**
 
-| Semester:      | FS23                                     |
+| Semester:      | FS24                                     |
 |:---------------|:---------------------------------------- |
-| **Data:**      | What type of data are you focussing on?  |
-| **Title:**     | The title of your project                |
-| **Student 1:** | Name of Student 1                        |
-| **Student 2:** | Name of Student 2                        |
+| **Data:**      | GPS Trajectory data                      |
+| **Title:**     | Walking detection from daily GPS trajectories   |
+| **Student:**   | Xiao Cui                                 |
 
 ## Abstract 
 <!-- (50-60 words) -->
-
+Walking is a simple physical activities which can embrace human health and well being. We tend to detect walking movements from daily GPS trajectories.
 ## Research Questions
 <!-- (50-60 words) -->
-
+1. What are compared with other travel modes?
 ## Results / products
 <!-- What do you expect, anticipate? -->
 
 ## Data
 <!-- What data will you use? Will you require additional context data? Where do you get this data from? Do you already have all the data? -->
-
+1. Raw GPS data collected by POSMO Application
+2. 
 ## Analytical concepts
 <!-- Which analytical concepts will you use? What conceptual movement spaces and respective modelling approaches of trajectories will you be using? What additional spatial analysis methods will you be using? -->
 
@@ -40,3 +40,6 @@ Analysis Geo 880**
 
 ## Questions? 
 <!-- Which questions would you like to discuss at the coaching session? -->
+1. How to match GPS trajectories (raw coordinates) with road segments/network?
+2. Can I use machine learning to detect travel modes (random forest, un-supervised)? If so, any recommendations in R packages/modeling?
+3. 
