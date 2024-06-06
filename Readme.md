@@ -18,7 +18,7 @@ Analysis Geo 880**
 
 ## Abstract 
 <!-- (50-60 words) -->
-Walking is a simple physical activity which can embrace human health and well-being. In this project we detect walking movements from daily GPS trajectories collected by POSMO application. We first summarize common attributes for heustric (rule-based) detection methods. Then we rebuild these approaches and apply them for walking detection. We also compare the performance of rule-based with machine learning methods.
+Walking is a simple physical activity which can embrace human health and well-being. In this project we detect walking movements from daily GPS trajectories collected by POSMO application. We first summarize common attributes for heustric (rule-based) detection methods from literatures. Then we rebuild these approaches and apply them for walking detection. We also compare the performance of rule-based with machine learning methods.
 
 ## Research Questions
 <!-- (50-60 words) -->
@@ -39,7 +39,7 @@ Walking is a simple physical activity which can embrace human health and well-be
 <!-- What data will you use? Will you require additional context data? Where do you get this data from? Do you already have all the data? -->
 1. Raw GPS data collected by POSMO Application from the data pool (need more data from others);
 2. Footway segments from Stadt Zurich (already have);
-3. Terrain from Swisstopo or Google Earth Engine (don't have now, but know how to access);
+3. Terrain from Swisstopo (don't have now, but know how to access);
 4. Points of interest (POI) from Open Street Map (OSM) (don't have now, but know how to access);
 
 ## Analytical concepts
@@ -51,18 +51,21 @@ Additional spatial analysis methods: clusters can be used to remove outliers in 
 ## R concepts
 <!-- Which R concepts, functions, packages will you mainly use. What additional spatial analysis methods will you be using? -->
 R concepts: we first use summary function to get an overview of our raw data. Other packages or functions for explanatory data handling can also be applied here.
-R functions: (1) deriving speed: speed is the main attribute for detecting walking; (2) spatial context: we also consider distance lag or location context as a key attribute for distinguishing indoor movement and walking.
+R functions: (1) deriving speed: speed is the main attribute for detecting walking; (2) spatial context: we also consider distance threshold or location context as a key attribute for distinguishing indoor movement and walking.
 R packages: (1) data handling: readr, dplyr, purrr, lubridate; (2) spatial operation: sf, terra, sfnetwork, igraph; (3) visualisation: ggplot2, plotly, tmap, leaflet; (4) machine learning: (not fixed).
 
 ## Risk analysis
 <!-- What could be the biggest challenges/problems you might face? What is your plan B? -->
-The biggest challenges include: (1) data cleaning (first and foremost step) can be time consuming if dataset is large (also for further data analysis and algorithm operation); Plan B here is to narrow the dataset size, and construct a clear workflow of data cleaning; (2) In this project we focus on walking detection, so it can be a challenge to detect "move" and "stop" for walking due to potential little variations in speed and distance; Plan B here is to 
+The biggest challenges include: (1) data cleaning (first and foremost step) can be time consuming if dataset is large (also for further data analysis and algorithm operation); Plan B here is to narrow the dataset size, and construct a clear workflow of data cleaning; (2) In this project we focus on walking detection, so it can be a challenge to detect "move" and "stop" for walking due to potential little variations in speed and distance; Plan B here is to operate supervised classification (data with mode labelled) for mode detection.
 
 ## Questions? 
 <!-- Which questions would you like to discuss at the coaching session? -->
 1. How to match GPS trajectories (raw coordinates) with road segments/network (one of rule-based approaches)?
+   A: see appendix under the course repository.
 2. Terrain (i.e., slope) can influence walking speed/direction/acceleration largely. How to include this factor into rule-based travel mode detection?
+   A: include it as a factor of speed in rule-based method.
 3. It can be a huge workload, but can I use machine learning to detect travel modes (random forest, clustering, etc.) for comparison? If so, any recommendations in R packages/materials?
+   A: operate rule-based methods first, include more if all good.
 
 ## References
 <!-- references about travel mode detection and walking detection from GPS trajectories -->
