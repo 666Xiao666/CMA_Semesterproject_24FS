@@ -1,0 +1,130 @@
+---
+title: "GEO880_Report"
+author: "Xiao Cui"
+format: html
+---
+
+## Preparation
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+```{r}
+# always work within a rproject
+library(readr)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(xfun)
+library(tmap)
+library(tidyr)
+library(mapview)
+```
+
+## Preprocessing
+
+
+```{r}
+posmo_df <- read_csv("data/posmo_03_23_05_03.csv",
+                 col_types = cols(
+                   user_id = col_character(),
+                   datetime = col_datetime(),
+                   weekday = col_factor(levels = c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")), # read daytime as a factor
+                   place_name = col_character(),
+                   transport_mode = col_character(),
+                   lon_x = col_double(),
+                   lat_y = col_double()
+                 ))
+
+posmo_df %>% as_tibble()
+```
+```{r}
+# Convert to sf
+posmo_sf <- st_as_sf(posmo_df, coords = c("lon_x", "lat_y"), crs = 4326)
+# Convert CRS to CH1903 / LV95 (EPSG:2056)
+posmo_sf <- st_transform(posmo_sf, crs = 2056)
+```
+
+```{r}
+
+
+# take a sample from "2024-04-03"
+posmo_0304_sf <- posmo_sf |>
+  filter(as.IDate(datetime) == "2024-04-03")
+
+# a function for assigning colors
+assign_color <- function(x) {
+  # Extract hour from datetime column
+  hour <- data.table::hour(x$datetime)
+  
+  # Assign colors based on hour ranges
+  color <- case_when(
+    hour >= 0 & hour < 12 ~ "orange",
+    hour >= 12 & hour < 24 ~ "blue",
+    TRUE ~ NA_character_
+  )
+  
+  # Create a summary data frame with colors
+  color_summary <- data.frame(geometry = x, color = color)
+  
+  # Convert to sf object
+  color_sf <- st_sf(color_summary, crs = st_crs(x))
+  
+  return(color_sf)
+}
+
+# Create colored sf object
+posmo_0304_sf_color <- assign_color(posmo_0304_sf)
+
+# repeated steps in Exercise A
+# Create the map with colored point data by time
+tmap_mode("view")
+tm_shape(posmo_0304_sf_color) + 
+  tm_dots(col = "color")
+```
+```{r}
+# key parameter here: summarise(do_union = FALSE)
+# connect points by order
+posmo_0304_line <- posmo_0304_sf |> 
+  # dissolve to a MULTIPOINT:
+  summarise(do_union = FALSE) |> 
+  st_cast("LINESTRING")
+
+# use tmap for visualizing our trajectory
+tmap_options(basemaps = "OpenStreetMap")
+
+tm_shape(posmo_0304_line) +
+  tm_lines() +
+  tm_shape(posmo_0304_sf) + 
+  tm_dots()
+```
+
+```{r}
+
+walk_0304 <- posmo_0304_sf |> filter(transport_mode == "Walk") 
+
+walk_0304 |> as_tibble()
+
+
+# connect points by order
+posmo_0304_walk <- posmo_0304_sf |> filter(transport_mode == "Walk") |>
+  # dissolve to a MULTIPOINT:
+  summarise(do_union = FALSE) |> 
+  st_cast("LINESTRING")
+
+# use tmap for visualizing our trajectory
+tmap_options(basemaps = "OpenStreetMap")
+
+tm_shape(posmo_0304_walk) +
+  tm_lines() +
+  tm_shape(posmo_0304_walk) + 
+  tm_dots()
+
+```
+
+```{r}
+# load gdb and filter foot way, show the table, and review on map
+footway_sf <- sf::st_read("data/Routing.gdb", layer = "NETZ_VELO") |> filter(FUSS == 1)
+footway_sf |> as_tibble()
+mapview(footway_sf)
+```
+
