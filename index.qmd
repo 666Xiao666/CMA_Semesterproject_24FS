@@ -1,14 +1,14 @@
 ---
-title: The title of your Semesterproject
-subtitle: A subtle subtitle
-author: Firstname1 Lastname1 and Firstname2 Lastname2
+title: Walking detection from daily GPS trajectories
+subtitle: a comparison between rule-based detection and supervised classification
+author: Xiao Cui
 format:
   html:
     code-fold: true
 execute:
   warning: false
   message: false
-lang: en  # switch to "de" if you write your report in german
+lang: en
 bibliography: bibliography.bib
 ---
 
@@ -21,15 +21,15 @@ bibliography: bibliography.bib
 ## Abstract
 
 ## Introduction
-
+Walking is a low-cost physical activity.
 @laube2011 investigate how temporal scale affects the calculation of movement parameters (speed, sinuosity and turning angle) of animal trajectories. 
 
 ## Material and Methods
-
+We used daily GPS data.
 ## Results
 
 ## Discussion
-
+We ignore.
 ## Appendix
 
 ### Wordcount
@@ -37,7 +37,6 @@ bibliography: bibliography.bib
 <!-- after installing the wordcountadding, remove the line "#| eval: false" -->
 
 ```{r}
-#| eval: false
 wordcountaddin::word_count("index.qmd")
 ```
 
