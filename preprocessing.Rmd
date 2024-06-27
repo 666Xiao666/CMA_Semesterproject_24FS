@@ -1,0 +1,823 @@
+
+```{r}
+#| code-summary: load packages, import data
+```
+```{r}
+# packages:
+
+## Default repository
+local({r <- getOption("repos")
+r["CRAN"] <- "http://cran.r-project.org" 
+options(repos=r)
+})
+
+check_pkg <- function(x)
+{
+  if (!require(x, character.only = TRUE, quietly = TRUE))
+  {
+    install.packages(x, dep = TRUE, verbose = FALSE, quiet = TRUE)
+    if(!require(x, character.only = TRUE, quietly = TRUE)) stop("Package not found")
+  }
+}
+check_pkg("dplyr")
+check_pkg("lubridate")
+check_pkg("geosphere")
+check_pkg("tidyverse")
+check_pkg("sf") # 
+check_pkg("purrr") # package for precise calculation
+check_pkg("readr") # a better way to read data than basic R
+check_pkg("rnaturalearth") # package for requiring DEM data
+check_pkg("raster")
+check_pkg("elevatr") # package for handling DEM
+check_pkg("terra") # package for raster data handling
+check_pkg("skimr") # a better package to summarize data
+check_pkg("ggplot2") # package for plots
+check_pkg("smplot2") # package for more functions based on ggplot
+check_pkg("mapview") # package for interactive maps
+check_pkg("randomForest") # package for random forest
+check_pkg("caret") # package for random forest
+check_pkg("e1071") # package for random forest
+```
+```{r}
+# importing data
+posmo_df <- readr::read_csv("posmo_2024-03-23_2024-06-15.csv",
+                            col_types = cols(
+                              user_id = col_character(),
+                              datetime = col_datetime(),
+                              weekday = col_factor(levels = c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")), # read daytime as a factor
+                              place_name = col_character(),
+                              transport_mode = col_factor(levels = c("Walk", "Tram", "Bus", "Bike", "Train", "Car")),
+                              lon_x = col_double(),
+                              lat_y = col_double()
+                            )) |> dplyr::select(-user_id) # remove id because we only have one "user" here
+
+
+```
+```{r}
+#| code-summary: have a review on the raw data
+# have a breif view of our data
+# Check structure of dataset
+skimr::skim(posmo_df)
+head(posmo_df)
+tail(posmo_df)
+# Extract the date from the datetime column
+posmo_df <- posmo_df |> mutate(date = as_date(datetime))
+# Count of days with records
+length(unique(posmo_df$date))
+# date records from
+min(posmo_df$date)
+# date records from
+max(posmo_df$date)
+
+```
+```{r}
+#| code summary: check if timestamp is ordered
+# Check rows where datetime is out of order
+disordered_df <- posmo_df %>%
+  mutate(is_ordered = c(TRUE, diff(datetime) >= 0)) %>%
+  filter(is_ordered = FALSE) |> as_tibble()
+
+```
+```{r}
+#| code-summary: a review of stop detection in POSMO
+# Group by datetime and count the number of occurrences
+repeated_counts <- posmo_df |> 
+  group_by(datetime) |> 
+  summarise(count = n()) |> 
+  filter(count > 1)
+
+# Display the repeated_counts partly
+cat(" Stop points detection:", "\n","Total count of stops:", nrow(repeated_counts), "\n","Possible point count of each stop:", unique(repeated_counts$count), "\n")
+# remove the temporary dataframe
+rm(repeated_counts)
+
+```
+```{r}
+#| code-summary: generate raw walking trajectories
+# Convert coordinates to LV95 (Swiss coordinate system)
+coordinates <- st_as_sf(posmo_df, coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE)
+coordinates_lv95 <- st_transform(coordinates, 2056)
+posmo_df$lv95_x <- st_coordinates(coordinates_lv95)[,1]
+posmo_df$lv95_y <- st_coordinates(coordinates_lv95)[,2]
+
+# Assign transport_mode_id based on transport_mode
+# Filter out rows with null values in the transport_mode column
+posmo_df <- posmo_df %>%
+  filter(!is.na(transport_mode))
+
+# Assign trip identifiers based on changes in transport_mode
+posmo_df <- posmo_df %>%
+  mutate(transport_mode_id = cumsum(c(1, as.numeric(transport_mode[-1] != transport_mode[-n()]))))
+
+walk <- posmo_df |> filter(transport_mode == "Walk")
+
+walk_sf <- st_as_sf(walk,
+                    coords = c("lv95_x", "lv95_y"),
+                    crs = 2056, remove = FALSE
+)
+
+# Create LINESTRING by grouping by transport_mode_id
+walk_line <- walk_sf %>% 
+  group_by(transport_mode_id) %>% 
+  summarise(do_union = FALSE) %>% 
+  st_cast("LINESTRING") |> 
+  mutate(length = st_length(geometry))
+
+# Group points by transport_mode_id and calculate the time duration for each group
+time_durations <- walk_sf %>%
+  group_by(transport_mode_id) %>%
+  summarise(
+    start_time = min(datetime),
+    end_time = max(datetime),
+    time_duration = as.numeric(difftime(max(datetime), min(datetime)), units = "secs")
+  ) |> st_drop_geometry()
+
+# Create LINESTRING by grouping by transport_mode_id
+walk_line <- walk_sf %>%
+  group_by(transport_mode_id) %>%
+  summarise(do_union = FALSE) %>%
+  st_cast("LINESTRING") %>%
+  mutate(length = st_length(geometry))
+
+# Join the time durations back to walk_line
+walk_line <- walk_line %>%
+  left_join(time_durations %>% dplyr::select(transport_mode_id, time_duration), by = "transport_mode_id")
+
+# Calculate the mean speed
+walk_line <- walk_line %>%
+  mutate(speed_m_s = as.numeric(length / time_duration))|>
+  mutate()
+
+# Sample the walk_line data
+sampled_walk_line <- walk_line %>%
+  sample_n(1)
+
+# view the sample by map
+mapview(sampled_walk_line, zcol = "transport_mode_id")
+
+```
+```{r}
+#| code-summary: remove data with duplicated timestamps
+posmo_df <- distinct(posmo_df,datetime,.keep_all=TRUE)
+
+```
+```{r}
+#| code-summary: date distribution
+# Extract the date from the datetime column
+# Exclude the data if the record of the day is less than three
+posmo_df <- posmo_df |> mutate(date = as_date(datetime)) |> group_by(date) |>
+  filter(n() >= 3) |>
+  ungroup()
+
+# Count the number of data points per date
+# Create a new column for the month
+date_counts <- posmo_df |> 
+  mutate(date = as.Date(datetime),
+         month = month(date, label = TRUE)) |> 
+  group_by(date, month) |> 
+  summarise(count = n(), .groups = 'drop')
+
+# Plot the result with points colored by month
+ggplot(date_counts, aes(x = date, y = count, color = month)) +
+  geom_line() + 
+  geom_point() +
+  labs(x = "Date", y = "Count of GPS Points", title = "Figure 1: Count of GPS Points per Date", color = "Month") +
+  theme_minimal() 
+# remove this temporary dataframe after plotting the result
+rm(date_counts)
+
+# Define helper functions
+distance_by_element <- function(later, now) {
+  as.numeric(st_distance(later, now, by_element = TRUE))
+}
+
+difftime_secs <- function(later, now){
+  as.numeric(difftime(later, now, units = "secs"))
+}
+
+posmo_sf <- posmo_df |>
+  st_as_sf(coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE) |> 
+  st_transform(2056)
+
+# rebuilding algorithm
+posmo_sf_chong <- posmo_sf |>
+  mutate(
+    stepMean = distance_by_element(geometry, lag(geometry, 6))
+  ) |>
+  mutate(
+    timeMean = difftime_secs(datetime, lag(datetime, 6))
+  ) |> 
+  mutate(speedMean = stepMean / timeMean) |>
+  mutate(walk = ifelse(speedMean > 0.56 & speedMean < 2.22, TRUE, FALSE))
+
+# Assign trip IDs based on gaps
+posmo_sf_chong <- posmo_sf_chong |> 
+  mutate(gap_id = ifelse(is.na(walk), 0, walk), # Replace NA values with 0
+         walk_id = cumsum(ifelse(gap_id == 1 & lag(gap_id, default = 0) == 0, 1, 0))) |> filter(gap_id == 1)
+
+# filter walk and consecutive group
+walk_chong <- posmo_sf_chong |> filter(gap_id == 1) |> 
+  group_by(walk_id) |> 
+  filter(n() >= 5) |> 
+  ungroup()
+
+# have an overview
+walk_chong |> as_tibble()
+
+# Define helper functions
+distance_by_element <- function(later, now) {
+  as.numeric(st_distance(later, now, by_element = TRUE))
+}
+
+difftime_secs <- function(later, now){
+  as.numeric(difftime(later, now, units = "secs"))
+}
+
+posmo_sf <- posmo_df |>
+  st_as_sf(coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE) |> 
+  st_transform(2056)
+
+# rebuilding algorithm
+posmo_sf_gong <- posmo_sf |>
+  mutate(
+    stepMean = distance_by_element(geometry, lag(geometry, 6))
+  ) |>
+  mutate(
+    timeMean = difftime_secs(datetime, lag(datetime, 6))
+  ) |> 
+  mutate(speedMean = stepMean / timeMean) |>
+  mutate(gap = ifelse(stepMean > 250 | timeMean > 150, TRUE, FALSE))
+
+# Assign trip IDs based on gaps
+posmo_sf_gong <- posmo_sf_gong |> 
+  mutate(gap_id = ifelse(is.na(gap), 0, gap), # Replace NA values with 0
+         tra_id = cumsum(gap_id) + 1)
+
+# Function to check and adjust trip IDs based on average speed
+adjust_trip_ids <- function(df) {
+  df <- df |> arrange(datetime)
+  df <- df |> group_by(tra_id) |> 
+    mutate(avg_speed = mean(speedMean, na.rm = TRUE)) |> 
+    ungroup()
+  
+  df <- df |> 
+    mutate(
+      tra_id = cumsum(lag(cumsum(gap), default = 0)) + 1,
+      new_gap = ifelse(avg_speed > 1.67, 1, 0)
+    ) |> 
+    mutate(tra_id = cumsum(new_gap) + 1) |> 
+    dplyr::select(-avg_speed, -new_gap)
+  
+  return(df)
+}
+
+# Apply the adjustment function
+walk_gong <- adjust_trip_ids(posmo_sf_gong) |>   group_by(tra_id) |> 
+  filter(n() > 1) |> 
+  ungroup()
+
+walk_gong |> as_tibble()
+
+```
+```{r}
+#| code-summary: speed based detection
+# Define the function to compute performance metrics for different lag values
+compute_metrics_for_lag <- function(posmo_df, lag_values) {
+  
+  # Define helper functions
+  distance_by_element <- function(later, now) {
+    as.numeric(st_distance(later, now, by_element = TRUE))
+  }
+  
+  difftime_secs <- function(later, now){
+    as.numeric(difftime(later, now, units = "secs"))
+  }
+  
+  # Convert dataframe to sf object
+  posmo_sf <- posmo_df |>
+    st_as_sf(coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE) |> 
+    st_transform(2056)
+  
+  # Initialize results list
+  results <- list()
+  
+  # Iterate over each lag value
+  for (lag_value in lag_values) {
+    
+    posmo_sf <- posmo_sf |>
+      mutate(
+        stepMean = distance_by_element(geometry, lag(geometry, lag_value))
+      ) |>
+      mutate(
+        timeMean = difftime_secs(datetime, lag(datetime, lag_value))
+      ) |> 
+      mutate (speedMean = stepMean / timeMean) |> 
+      mutate (acc = (lead(speedMean) - speedMean) / timeMean) |>
+      mutate(
+        walk = (speedMean <= 1.7)
+      ) |>
+      mutate(
+        walk_s_a = (speedMean <= 1.7) & (abs(acc) <= 0.009)
+      )
+    
+    # Validation of speed and acceleration based detection
+    walk_tp <- posmo_sf |> filter(transport_mode == "Walk" & walk == TRUE)
+    walk_fp <- posmo_sf |> filter(transport_mode != "Walk" & walk == TRUE)
+    walk_fn <- posmo_sf |> filter(transport_mode == "Walk" & walk != TRUE)
+    walk_tn <- posmo_sf |> filter(transport_mode != "Walk" & walk != TRUE)
+    
+    tp <- nrow(walk_tp)
+    fp <- nrow(walk_fp)
+    fn <- nrow(walk_fn)
+    tn <- nrow(walk_tn)
+    
+    accuracy <- (tp + tn) / (tp + tn + fp + fn)
+    precision <- tp/ (tp + fp)
+    specificity <- tn / (tn + fp)
+    sensitivity <- tp / (tp + fn)
+    recall <- tp / (tp + fn)
+    balance_accuracy <- (specificity + sensitivity) / 2
+    f1 <- 2 * (precision * recall) / (precision + recall)
+    
+    # Store results for the current lag value
+    results[[as.character(lag_value)]] <- c(
+      accuracy = accuracy,
+      precision = precision,
+      specificity = specificity,
+      sensitivity = sensitivity,
+      recall = recall,
+      balance_accuracy = balance_accuracy,
+      f1_score = f1
+    )
+  }
+  
+  # Convert results list to data frame
+  results_df <- do.call(rbind, results)
+  return(results_df)
+}
+
+# Values here represent minutes
+lag_values <- c(1, 2, 3, 4, 5)
+
+# Compute metrics for the given lag values
+metrics_df <- compute_metrics_for_lag(posmo_df, lag_values)
+
+# Display the results
+print(metrics_df)
+
+```
+```{r}
+#| code-summary: speed-acceleration based detection
+# Define the function to compute performance metrics for different lag values
+compute_metrics_for_lag <- function(posmo_df, lag_values) {
+  
+  # Define helper functions
+  distance_by_element <- function(later, now) {
+    as.numeric(st_distance(later, now, by_element = TRUE))
+  }
+  
+  difftime_secs <- function(later, now){
+    as.numeric(difftime(later, now, units = "secs"))
+  }
+  
+  # Convert dataframe to sf object
+  posmo_sf <- posmo_df |>
+    st_as_sf(coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE) |> 
+    st_transform(2056)
+  
+  # Initialize results list
+  results <- list()
+  
+  # Iterate over each lag value
+  for (lag_value in lag_values) {
+    
+    posmo_sf <- posmo_sf |>
+      mutate(
+        stepMean = distance_by_element(geometry, lag(geometry, lag_value))
+      ) |>
+      mutate(
+        timeMean = difftime_secs(datetime, lag(datetime, lag_value))
+      ) |> 
+      mutate (speedMean = stepMean / timeMean) |> 
+      mutate (acc = (lead(speedMean) - speedMean) / timeMean) |>
+      mutate(
+        walk = (speedMean <= 1.7)
+      ) |>
+      mutate(
+        walk_s_a = (speedMean <= 1.7) & (abs(acc) <= 0.009)
+      )
+    
+    # Validation of speed and acceleration based detection
+    walk_tp_s_a <- posmo_sf |> filter(transport_mode == "Walk" & walk_s_a == TRUE)
+    walk_fp_s_a <- posmo_sf |> filter(transport_mode != "Walk" & walk_s_a == TRUE)
+    walk_fn_s_a <- posmo_sf |> filter(transport_mode == "Walk" & walk_s_a != TRUE)
+    walk_tn_s_a <- posmo_sf |> filter(transport_mode != "Walk" & walk_s_a != TRUE)
+    
+    tp_s_a <- nrow(walk_tp_s_a)
+    fp_s_a <- nrow(walk_fp_s_a)
+    fn_s_a <- nrow(walk_fn_s_a)
+    tn_s_a <- nrow(walk_tn_s_a)
+    
+    accuracy_s_a <- (tp_s_a + tn_s_a) / (tp_s_a + tn_s_a + fp_s_a + fn_s_a)
+    precision_s_a <- tp_s_a / (tp_s_a + fp_s_a)
+    specificity_s_a <- tn_s_a / (tn_s_a + fp_s_a)
+    sensitivity_s_a <- tp_s_a / (tp_s_a + fn_s_a)
+    recall_s_a <- tp_s_a / (tp_s_a + fn_s_a)
+    balance_accuracy_s_a <- (specificity_s_a + sensitivity_s_a) / 2
+    f1_s_a <- 2 * (precision_s_a * recall_s_a) / (precision_s_a + recall_s_a)
+    
+    # Store results for the current lag value
+    results[[as.character(lag_value)]] <- c(
+      accuracy = accuracy_s_a,
+      precision = precision_s_a,
+      specificity = specificity_s_a,
+      sensitivity = sensitivity_s_a,
+      recall = recall_s_a,
+      balance_accuracy = balance_accuracy_s_a,
+      f1_score = f1_s_a
+    )
+  }
+  
+  # Convert results list to data frame
+  results_df <- do.call(rbind, results)
+  return(results_df)
+}
+
+# Example usage
+lag_values <- c(1, 2, 3, 4, 5)
+
+# Compute metrics for the given lag values
+metrics_df <- compute_metrics_for_lag(posmo_df, lag_values)
+
+# Display the results
+print(metrics_df)
+
+```
+```{r}
+#| code-summary: define the function to compute performance metrics for different speedMean and abs(acc) threshold values
+
+compute_metrics_for_thresholds <- function(posmo_df, thresholds) {
+  
+  # Define helper functions
+  distance_by_element <- function(later, now) {
+    as.numeric(st_distance(later, now, by_element = TRUE))
+  }
+  
+  difftime_secs <- function(later, now){
+    as.numeric(difftime(later, now, units = "secs"))
+  }
+  
+  # Convert dataframe to sf object
+  posmo_sf <- posmo_df |>
+    st_as_sf(coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE) |> 
+    st_transform(2056)
+  
+  # Initialize results list
+  results <- list()
+  
+  # Iterate over each pair of thresholds
+  for (threshold in thresholds) {
+    speed_threshold <- threshold[1]
+    acc_threshold <- threshold[2]
+    
+    posmo_sf <- posmo_sf |>
+      mutate(
+        stepMean = distance_by_element(geometry, lag(geometry, 6))  # Keeping lag value fixed as 6
+      ) |>
+      mutate(
+        timeMean = difftime_secs(datetime, lag(datetime, 6))
+      ) |> 
+      mutate (speedMean = stepMean / timeMean) |> 
+      mutate (acc = (lead(speedMean) - speedMean) / timeMean) |>
+      mutate(
+        walk = (speedMean <= speed_threshold)
+      ) |>
+      mutate(
+        walk_s_a = (speedMean <= speed_threshold) & (abs(acc) <= acc_threshold)
+      )
+    
+    # Validation of speed and acceleration based detection
+    walk_tp_s_a <- posmo_sf |> filter(transport_mode == "Walk" & walk_s_a == TRUE)
+    walk_fp_s_a <- posmo_sf |> filter(transport_mode != "Walk" & walk_s_a == TRUE)
+    walk_fn_s_a <- posmo_sf |> filter(transport_mode == "Walk" & walk_s_a != TRUE)
+    walk_tn_s_a <- posmo_sf |> filter(transport_mode != "Walk" & walk_s_a != TRUE)
+    
+    tp_s_a <- nrow(walk_tp_s_a)
+    fp_s_a <- nrow(walk_fp_s_a)
+    fn_s_a <- nrow(walk_fn_s_a)
+    tn_s_a <- nrow(walk_tn_s_a)
+    
+    accuracy_s_a <- (tp_s_a + tn_s_a) / (tp_s_a + tn_s_a + fp_s_a + fn_s_a)
+    precision_s_a <- tp_s_a / (tp_s_a + fp_s_a)
+    specificity_s_a <- tn_s_a / (tn_s_a + fp_s_a)
+    sensitivity_s_a <- tp_s_a / (tp_s_a + fn_s_a)
+    recall_s_a <- tp_s_a / (tp_s_a + fn_s_a)
+    balance_accuracy_s_a <- (specificity_s_a + sensitivity_s_a) / 2
+    f1_s_a <- 2 * (precision_s_a * recall_s_a) / (precision_s_a + recall_s_a)
+    
+    # Create a row name based on the current thresholds
+    row_name <- paste0("speed=", speed_threshold, ",acc=", acc_threshold)
+    
+    # Store results for the current pair of thresholds
+    results[[row_name]] <- c(
+      accuracy = accuracy_s_a,
+      precision = precision_s_a,
+      specificity = specificity_s_a,
+      sensitivity = sensitivity_s_a,
+      recall = recall_s_a,
+      balance_accuracy = balance_accuracy_s_a,
+      f1_score = f1_s_a
+    )
+  }
+  
+  # Convert results list to data frame
+  results_df <- do.call(rbind, results)
+  return(results_df)
+}
+
+# Example usage
+thresholds <- list(
+  c(1.5, 0.001),
+  c(1.7, 0.001),
+  c(1.9, 0.001),
+  c(1.5, 0.002),
+  c(1.7, 0.002),
+  c(1.9, 0.002)
+)
+
+# Compute metrics for the given thresholds
+metrics_df <- compute_metrics_for_thresholds(posmo_df, thresholds)
+
+# Display the results
+print(metrics_df)
+
+```
+```{r}
+#| code-summary: random forest
+# code summary: random forest with parameters
+# Prepare the data
+posmo_simple <- posmo_df %>%
+  mutate(transport_mode = case_when(
+    transport_mode %in% c("Tram", "Train", "Bus", "Car") ~ "Vehicle",
+    transport_mode == "Bike" ~ "Walk",
+    TRUE ~ transport_mode
+  ))
+
+trajectories_all_sf <- st_as_sf(posmo_simple,
+                                coords = c("lv95_x", "lv95_y"),
+                                crs = 2056, remove = FALSE
+)
+
+# Group points by transport_mode_id and get the unique transport_mode for each group
+mode_mapping <- posmo_simple %>%
+  group_by(transport_mode_id) %>%
+  summarise(transport_mode = first(transport_mode)) %>%
+  ungroup()
+
+# Create LINESTRING by grouping by transport_mode_id
+trajectories_all_line <- trajectories_all_sf %>% 
+  group_by(transport_mode_id) %>% 
+  summarise(do_union = FALSE) %>% 
+  st_cast("LINESTRING") %>% 
+  mutate(length = st_length(geometry))
+
+# Join transport_mode to trajectories_all_line
+trajectories_all_line <- trajectories_all_line %>%
+  left_join(mode_mapping, by = "transport_mode_id") %>%
+  mutate(transport_mode = as.factor(transport_mode))
+
+# Group points by transport_mode_id and calculate the time duration for each group
+time_duration_all <- trajectories_all_sf %>%
+  group_by(transport_mode_id) %>%
+  summarise(
+    start_time = min(datetime),
+    end_time = max(datetime),
+    time_duration = as.numeric(difftime(max(datetime), min(datetime)), units = "secs")
+  ) %>% st_drop_geometry()
+
+# Join the time durations back to walk_line
+trajectories_all_line <- trajectories_all_line %>%
+  left_join(time_duration_all %>% dplyr::select(transport_mode_id, time_duration), by = "transport_mode_id")
+
+# Calculate the mean speed and acceleration
+trajectories_all_line <- trajectories_all_line %>%
+  mutate(
+    speed_m_s = as.numeric(length / time_duration),
+    acc_m2_s = as.numeric(speed_m_s / time_duration)
+  )
+
+# Remove rows with NA values
+trajectories_all_line <- trajectories_all_line %>%
+  drop_na()
+
+# Split the data into training and testing datasets
+set.seed(123)
+train_index <- createDataPartition(trajectories_all_line$transport_mode, p = 0.7, list = FALSE)
+train_set <- trajectories_all_line[train_index, ]
+test_set <- trajectories_all_line[-train_index, ]
+
+# Define the control parameters for cross-validation
+trControl <- trainControl(method = "cv", number = 10, search = "grid")
+
+# Tune mtry, maxnodes, and ntree
+tuneGrid <- expand.grid(
+  mtry = 1:10,
+  maxnodes = 5:15,
+  ntree = c(100, 200, 300, 400, 500)
+)
+
+customRF <- list(type = "Classification",
+                 library = "randomForest",
+                 loop = NULL,
+                 parameters = data.frame(parameter = c("mtry", "maxnodes", "ntree"),
+                                         class = rep("numeric", 3),
+                                         label = c("mtry", "maxnodes", "ntree")),
+                 grid = function(x, y, len = NULL, search = "grid") {
+                   expand.grid(mtry = 1:10, maxnodes = 5:15, ntree = c(100, 200, 300, 400, 500))
+                 },
+                 fit = function(x, y, wts, param, lev, last, classProbs, ...) {
+                   randomForest(x, y, mtry = param$mtry, maxnodes = param$maxnodes, ntree = param$ntree, ...)
+                 },
+                 predict = function(modelFit, newdata, submodels = NULL) {
+                   predict(modelFit, newdata)
+                 },
+                 prob = function(modelFit, newdata, submodels = NULL) {
+                   predict(modelFit, newdata, type = "prob")
+                 },
+                 levels = function(x) x$classes)
+
+# Train the model
+set.seed(123)
+rf_model <- train(
+  transport_mode ~ length + time_duration + speed_m_s + acc_m2_s, 
+  data = train_set,
+  method = customRF,
+  metric = "Accuracy",
+  tuneGrid = tuneGrid,
+  trControl = trControl,
+  nodesize = 14,
+  importance = TRUE
+)
+
+# Print the results
+print(rf_model)
+
+# Evaluate the final model on the test set
+test_predictions <- predict(rf_model, newdata = test_set)
+
+# Evaluate model performance
+confusionMatrix(test_predictions, test_set$transport_mode)
+
+# Variable Importance Plot
+varImpPlot(rf_model$finalModel)
+
+
+```
+```{r}
+#| code summary: map matching with sample
+# Load the walkway network
+walkway_sf <- st_read("foot_zurich.gpkg", layer = "taz_mm.tbl_routennetz")
+
+# Convert walk points to sf object
+walk_sf <- st_as_sf(walk, coords = c("lv95_x", "lv95_y"), crs = 2056, remove = FALSE)
+
+# Ensure both sf objects have the same CRS
+walkway_sf <- st_transform(walkway_sf, crs = st_crs(walk_sf))
+
+# Create a buffer around each point
+buffered_points <- st_buffer(walk_sf, dist = 10)
+
+# Find intersecting lines for each point
+intersections <- st_intersects(buffered_points, walkway_sf)
+
+# Function to find the nearest linestring for each point within the buffer
+find_nearest_line <- function(point, lines) {
+  # Ensure CRS match
+  if (st_crs(point) != st_crs(lines)) {
+    lines <- st_transform(lines, crs = st_crs(point))
+  }
+  
+  if (nrow(lines) == 0) {
+    return(st_geometry(point))
+  }
+  
+  distances <- st_distance(point, lines)
+  nearest_line_idx <- which.min(distances)
+  nearest_line <- lines[nearest_line_idx, ]
+  
+  nearest_point <- st_nearest_points(point, nearest_line)
+  st_cast(nearest_point, "POINT")[2]  # Take the second point which is on the linestring
+}
+
+# Apply the function to each point in walk_sf
+walk_snapped <- walk_sf %>%
+  rowwise() %>%
+  mutate(
+    snapped_geometry = list(find_nearest_line(geometry, walkway_sf[intersections[[cur_group_id()]], ]))
+  ) %>%
+  ungroup()
+
+# Convert snapped_geometry to a single geometry column
+snapped_geometries <- st_sfc(do.call(c, lapply(walk_snapped$snapped_geometry, st_geometry)), crs = st_crs(walk_sf))
+
+# Create a new sf object with the snapped geometries
+walk_snapped_sf <- walk_snapped %>%
+  mutate(geometry = snapped_geometries) %>%
+  st_as_sf() %>%
+  dplyr::select(-snapped_geometry)
+
+# Create LINESTRING by grouping by transport_mode_id
+walk_snapped_line <- walk_snapped_sf %>% 
+  group_by(transport_mode_id) %>% 
+  summarise(do_union = FALSE) %>% 
+  st_cast("LINESTRING")
+
+# Define the number of lines to sample
+number_of_lines_to_sample <- 1
+
+# Sample lines with the same transport_mode_id from both collections
+sampled_walk_line <- walk_line %>%
+  group_by(transport_mode_id) %>%
+  sample_n(number_of_lines_to_sample) %>%
+  ungroup() %>%
+  mutate(source = "original")
+
+sampled_walk_snapped_line <- walk_snapped_line %>%
+  group_by(transport_mode_id) %>%
+  sample_n(number_of_lines_to_sample) %>%
+  ungroup() %>%
+  mutate(source = "snapped")
+
+# Combine the sampled lines into a single sf object
+combined_lines <- bind_rows(sampled_walk_line, sampled_walk_snapped_line)
+# use 1 as an example
+sample_combine <- combined_lines |> filter(transport_mode_id == 1)
+# Plot the lines on the same map with different colors
+mapview(sample_combine, zcol = "source")
+
+```
+```{r}
+#| code-summary: calculate gradient
+posmo_sf <- st_as_sf(posmo_df, coords = c("lon_x", "lat_y"), crs = 4326, remove = FALSE)
+
+
+# Read the TIFF file back later
+dem_raster <- raster::raster("switzerland_dem_30m.tif")
+
+
+dem_df <- terra::extract(dem_raster, st_coordinates(posmo_sf))
+
+walk_trip_dem <- cbind(posmo_sf, dem_df)
+
+
+# Convert coordinates to LV95 (Swiss coordinate system)
+coordinates <- st_as_sf(walk_trip_dem, coords = c("lon_x", "lat_y"), crs = 4326)
+coordinates_lv95 <- st_transform(coordinates, 2056)
+walk_trip_dem$lv95_x <- st_coordinates(coordinates_lv95)[,1]
+walk_trip_dem$lv95_y <- st_coordinates(coordinates_lv95)[,2]
+
+# Calculate distances and speeds between consecutive points
+distance_by_element <- function(later, now) {
+  as.numeric(
+    st_distance(later, now, by_element = TRUE)
+  )
+}
+
+difftime_secs <- function(later, now){
+  as.numeric(difftime(later, now, units = "secs"))
+}
+
+diff_ele <- function(later, now){
+  as.numeric(difftime(later, now, units = "secs"))
+}
+
+walk_trip_dem <- walk_trip_dem |>
+  mutate(
+    stepMean = 
+      distance_by_element(geometry, lag(geometry, 6))
+  ) |>
+  mutate(
+    timeMean = 
+      difftime_secs(datetime, lag(datetime, 6))
+  ) |> 
+  mutate (speedMean = stepMean/timeMean) |> 
+  mutate (acc = (speedMean - lag(speedMean, 6))/timeMean)|> 
+  mutate (gradient = (dem_df - lag(dem_df, 6))/stepMean)
+
+# analyze walk trip
+walk_trip_dem_filterd <- walk_trip_dem |> filter(transport_mode == "Walk")
+
+# pearson correlation test
+cor.test(walk_trip_dem_filterd$speedMean, walk_trip_dem_filterd$gradient, method = "spearman", exact = F)
+
+# plot correlation
+ggplot(data = walk_trip_dem_filterd, mapping = aes(x = gradient, y = speedMean)) +
+  geom_point(shape = 21, fill = "#0f993d", color = "white", size = 3) +
+  smplot2::sm_statCorr(corr_method = "spearman")
+
+
+
+
+knitr::spin("preprocessing.R")
+```
+
