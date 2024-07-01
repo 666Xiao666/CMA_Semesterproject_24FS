@@ -662,7 +662,7 @@ We assume POSMO application has similar functions with a GPS logger (i.e., do no
 <div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>posmo_df <span class="ot">&lt;-</span> <span class="fu">distinct</span>(posmo_df,datetime,<span class="at">.keep_all=</span><span class="cn">TRUE</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </details>
 </div>
-<p>If there is no movement within one day, there will be only one location (<code>place_name</code> in the attribute table) recorded. Here we define “valid trip day” as “the day with at least three GPS records”. Based on that rule, we generate 35931 GPS points, with 55 valid trip information. Figure 1 below shows the among different dates.</p>
+<p>If there is no movement within one day, there will be only one location (<code>place_name</code> in the attribute table) recorded. Here we define “valid trip day” as “the day with at least three GPS records”. Based on that rule, we generate 35931 GPS points, with 55 valid trip days information. Figure 1 below shows the among different dates.</p>
 <div class="cell">
 <details class="code-fold">
 <summary>date distribution</summary>
